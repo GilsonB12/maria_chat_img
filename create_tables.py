@@ -1,6 +1,6 @@
+# create_tables.py
 from app.models.database import initialize_database
 
-if __name__ == "__main__":
-    print("Criando tabelas no banco de dados...")
-    initialize_database()
-    print("Tabelas criadas com sucesso!")
+print("Inicializando o banco de dados e criando tabelas...")
+initialize_database()
+print("Tabelas criadas ou atualizadas com sucesso!")

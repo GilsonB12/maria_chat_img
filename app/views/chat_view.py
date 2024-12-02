@@ -1,38 +1,90 @@
-import tkinter as tk
-from tkinter import scrolledtext
-from app.controllers.chat_controller import get_gpt_response
-from app.models.database import initialize_database
+from tkinter import Tk, Text, Entry, Button, filedialog
+from app.controllers.chat_controller import (
+    create_assistant,
+    create_thread,
+    add_message_to_thread,
+    process_user_image,
+    run_thread,
+    save_message,
+    generate_text_embedding,
+)
 
-def send_message(user_input, chat_display):
-    """Envia a mensagem do usuário e exibe a resposta do GPT."""
-    user_message = user_input.get("1.0", tk.END).strip()
-    if user_message:
-        chat_display.insert(tk.END, f"Você: {user_message}\n")
-        user_input.delete("1.0", tk.END)
+def start_chat_ui():
+    """Inicia a interface gráfica do chat."""
+    assistant = create_assistant()
+    thread = create_thread()
 
-        # Obter resposta do GPT
-        gpt_reply = get_gpt_response(user_message)
-        chat_display.insert(tk.END, f"GPT: {gpt_reply}\n")
+    root = Tk()
+    root.title("Chat Assistant")
 
-def start_chat_app():
-    """Inicia a aplicação e a interface Tkinter."""
-    initialize_database()
+    chat_display = Text(root, height=20, width=80, state="disabled")
+    chat_display.pack()
 
-    root = tk.Tk()
-    root.title("Chat com GPT")
+    user_input = Entry(root, width=70)
+    user_input.pack(side="left", padx=(10, 0))
 
-    # Tela de exibição do chat
-    chat_display = scrolledtext.ScrolledText(root, wrap=tk.WORD, height=20, width=50)
-    chat_display.pack(pady=10)
-    chat_display.config(state=tk.NORMAL)
+    def send_message():
+        """Envia uma mensagem de texto para o Assistant."""
+        user_message = user_input.get().strip()
+        if user_message:
+            chat_display.config(state="normal")
+            chat_display.insert("end", f"Você: {user_message}\n")
+            chat_display.config(state="disabled")
 
-    # Entrada de texto
-    user_input = tk.Text(root, height=2, width=40)
-    user_input.pack(pady=5)
+            save_message(sender="user", content=user_message)
 
-    # Botão de enviar
-    send_button = tk.Button(root, text="Enviar", command=lambda: send_message(user_input, chat_display))
-    send_button.pack()
+            assistant_reply = run_thread(
+                thread_id=thread.id,
+                assistant_id=assistant.id,
+                instructions="Responda à mensagem do usuário de forma clara e concisa."
+            )
 
-    # Rodar a interface
+            chat_display.config(state="normal")
+            chat_display.insert("end", f"Assistant: {assistant_reply}\n")
+            chat_display.config(state="disabled")
+            user_input.delete(0, "end")
+
+    def send_image():
+        """Seleciona uma imagem e a envia para processamento."""
+        file_path = filedialog.askopenfilename(
+            filetypes=[("Image Files", "*.png *.jpg *.jpeg *.bmp *.gif")]
+        )
+        if file_path:
+            chat_display.config(state="normal")
+            chat_display.insert("end", f"Você enviou uma imagem: {file_path}\n")
+            chat_display.config(state="disabled")
+
+            # Processar a imagem
+            assistant_reply = process_user_image(file_path)
+
+            chat_display.config(state="normal")
+            chat_display.insert("end", f"Assistant: {assistant_reply}\n")
+            chat_display.config(state="disabled")
+
+
+    def generate_image_embedding_ui():
+        """Seleciona uma imagem e gera o embedding."""
+        file_path = filedialog.askopenfilename(
+            filetypes=[("Image Files", "*.png *.jpg *.jpeg *.bmp *.gif")]
+        )
+        if file_path:
+            embedding = generate_text_embedding(file_path)
+            if embedding:
+                chat_display.config(state="normal")
+                chat_display.insert("end", f"Embedding gerado para a imagem: {file_path}\n{embedding}\n")
+                chat_display.config(state="disabled")
+            else:
+                chat_display.config(state="normal")
+                chat_display.insert("end", "Erro ao gerar o embedding da imagem.\n")
+                chat_display.config(state="disabled")
+
+    send_button = Button(root, text="Enviar Mensagem", command=send_message)
+    send_button.pack(side="left", padx=(10, 0))
+
+    image_button = Button(root, text="Enviar Imagem", command=send_image)
+    image_button.pack(side="left", padx=(10, 0))
+
+    embedding_button = Button(root, text="Gerar Embedding de Imagem", command=generate_image_embedding_ui)
+    embedding_button.pack(side="left", padx=(10, 0))
+
     root.mainloop()

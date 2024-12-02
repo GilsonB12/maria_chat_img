@@ -12,3 +12,4 @@ def initialize_database():
     """Inicializa o banco de dados e cria tabelas."""
     from app.models.message_model import Message
     Base.metadata.create_all(bind=engine)
+
