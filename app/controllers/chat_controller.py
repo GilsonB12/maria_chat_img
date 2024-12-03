@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 from app.models.database import SessionLocal
 from app.models.message_model import Message
 import base64
+import numpy as np
+
 
 load_dotenv()
 
@@ -25,6 +27,51 @@ def save_image_locally(image_path: str) -> str:
         with open(destination_path, "wb") as dst:
             dst.write(src.read())
     return destination_path
+
+
+def get_last_user_message():
+    """Recupera a última mensagem enviada pelo usuário."""
+    db: Session = SessionLocal()
+    try:
+        # Busca a última mensagem do usuário ordenada pela data
+        last_message = (
+            db.query(Message)
+            .filter(Message.sender == "user")
+            .order_by(Message.timestamp.desc())
+            .first()
+        )
+        return last_message.content if last_message else None
+    except Exception as e:
+        print(f"Erro ao buscar a última mensagem do usuário: {e}")
+        return None
+    finally:
+        db.close()
+
+
+def cosine_similarity(vec1, vec2):
+    """Calcula a similaridade de cosseno entre dois vetores."""
+    vec1 = np.array(vec1)
+    vec2 = np.array(vec2)
+    dot_product = np.dot(vec1, vec2)
+    norm_vec1 = np.linalg.norm(vec1)
+    norm_vec2 = np.linalg.norm(vec2)
+    return dot_product / (norm_vec1 * norm_vec2)
+
+
+def get_all_embeddings():
+    """Busca todos os embeddings salvos no banco."""
+    db: Session = SessionLocal()
+    try:
+        embeddings = db.query(Message).filter(Message.image_embedding.isnot(None)).all()
+        return [
+            {"embedding": record.image_embedding, "message": record.content}
+            for record in embeddings
+        ]
+    except Exception as e:
+        print(f"Erro ao buscar embeddings do banco: {e}")
+        return []
+    finally:
+        db.close()
 
 
 def process_user_image(image_path: str, prompt: str = None):
@@ -104,22 +151,23 @@ def process_user_image(image_path: str, prompt: str = None):
         return "Erro ao processar a imagem."
 
 
-def generate_text_embedding(text: str):
+def generate_text_embedding(text, model="text-embedding-3-small"):
     """
-    Gera o embedding de um texto usando a API da OpenAI.
+    Gera um embedding para o texto usando o modelo da OpenAI.
     """
     try:
         response = client.embeddings.create(
             input=text,
-            model="text-embedding-3-small",
+            model=model
         )
 
+        # Acessando corretamente o primeiro embedding retornado
         embedding = response.data[0].embedding
         return embedding
-
     except Exception as e:
         print(f"Erro ao gerar embedding do texto: {e}")
         return None
+
 
 def save_message(sender: str, content: str = None, image_path: str = None, image_embedding: dict = None):
     """
@@ -179,7 +227,7 @@ def run_thread(thread_id, assistant_id, instructions):
         def __init__(self):
             super().__init__()
             self.response = ""
-            self.has_initial_text = False
+            self.has_initial_text = False  # Flag para verificar se o texto inicial foi processado
 
         @override
         def on_text_created(self, text):
@@ -199,6 +247,7 @@ def run_thread(thread_id, assistant_id, instructions):
     # Inicializar o EventHandler
     event_handler = EventHandler()
 
+    # Executar o Run com o stream
     with client.beta.threads.runs.stream(
         thread_id=thread_id,
         assistant_id=assistant_id,
@@ -207,6 +256,82 @@ def run_thread(thread_id, assistant_id, instructions):
     ) as stream:
         stream.until_done()
 
+    # Salvar a resposta completa no banco após o stream finalizar
     save_message(sender="assistant", content=event_handler.response)
 
+    # Verificar se a resposta começa com "Sim"
+    if event_handler.response.lower().startswith("sim"):
+        # Obter o texto do usuário
+        user_last_message = get_last_user_message()
+        print(f'funcinou')
+        if user_last_message:
+            # Gerar o embedding do texto do usuário
+            user_embedding = generate_text_embedding(user_last_message)
+            print('entrou')
+            if user_embedding:
+                # Buscar todos os embeddings do banco
+                embeddings = get_all_embeddings()
+                print('buscando embeddings')
+                # Encontrar embeddings semelhantes
+                similar_message = find_similar_embedding(user_embedding, embeddings)
+
+                if similar_message:
+                    print(f"Mensagem semelhante encontrada: {similar_message['message']}")
+                else:
+                    print("Nenhuma mensagem semelhante encontrada.")
+            else:
+                print("Erro ao gerar embedding do texto do usuário.")
+        else:
+            print("Nenhuma mensagem do usuário encontrada.")
+
     return event_handler.response
+
+
+
+
+def find_similar_embedding(user_embedding, embeddings, threshold=0.7):
+    """
+    Encontra embeddings semelhantes com base no embedding do usuário.
+    """
+    try:
+        # Validações para evitar erros
+        if user_embedding is None:
+            print("O embedding do usuário está vazio.")
+            return None
+
+        # Filtrar embeddings válidos no banco
+        valid_embeddings = [
+            {"embedding": emb["embedding"], "message": emb["message"]}
+            for emb in embeddings
+            if emb["embedding"] is not None
+        ]
+
+        # Verificar se há embeddings válidos para comparação
+        if not valid_embeddings:
+            print("Nenhum embedding válido encontrado no banco.")
+            return None
+
+        # Calcular similaridade
+        results = []
+        for emb in valid_embeddings:
+            similarity = cosine_similarity(user_embedding, emb["embedding"])
+            if similarity >= threshold:
+                results.append({"similarity": similarity, "message": emb["message"]})
+
+        # Ordenar por maior similaridade
+        results.sort(key=lambda x: x["similarity"], reverse=True)
+
+        return results[0] if results else None
+    except Exception as e:
+        print(f"Erro ao buscar embedding semelhante: {e}")
+        return None
+
+
+def fetch_last_user_message():
+    """Recupera a última mensagem enviada pelo usuário."""
+    db: Session = SessionLocal()
+    try:
+        last_message = db.query(Message).filter(Message.sender == "user").order_by(Message.timestamp.desc()).first()
+        return last_message.content if last_message else None
+    finally:
+        db.close()

@@ -36,13 +36,19 @@ def start_chat_ui():
             assistant_reply = run_thread(
                 thread_id=thread.id,
                 assistant_id=assistant.id,
-                instructions="Responda à mensagem do usuário de forma clara e concisa."
+                instructions="""
+                            Você é um assistente que identifica mensagens que se referem a imagens
+                            ou estão relacionadas ao conteúdo de imagens. Você deve sempre iniciar 
+                            dizendo se sim ou não para se a mensagem se refere há uma
+                            imagem ou não e logo após deve explicar.
+                            """
             )
 
             chat_display.config(state="normal")
             chat_display.insert("end", f"Assistant: {assistant_reply}\n")
             chat_display.config(state="disabled")
             user_input.delete(0, "end")
+
 
     def send_image():
         """Seleciona uma imagem e a envia para processamento."""
