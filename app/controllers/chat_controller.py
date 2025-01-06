@@ -33,7 +33,6 @@ def get_last_user_message():
     """Recupera a última mensagem enviada pelo usuário."""
     db: Session = SessionLocal()
     try:
-        # Busca a última mensagem do usuário ordenada pela data
         last_message = (
             db.query(Message)
             .filter(Message.sender == "user")
@@ -95,8 +94,10 @@ def process_user_image(image_path: str, prompt: str = None):
         # Prompt padrão
         if not prompt:
             prompt = """
-            Descreva detalhadamente o conteúdo desta imagem. 
-            Para refeições, inclua detalhes sobre macronutrientes e calorias.
+            Você é uma IA de reconhecimento de imagem.
+            Descreva detalhadamente o conteúdo desta imagem.
+            Retire o máximo de descrição e detalhes da imagem e escolha palavras chaves para a imagem.
+            Deve existir características visuais, tags da imagem e detalhes específicos da imagem.
             """
 
         # Cabeçalhos e payload
@@ -121,22 +122,18 @@ def process_user_image(image_path: str, prompt: str = None):
             ],
         }
 
-        # Envia a requisição para a API
         response = requests.post(
             "https://api.openai.com/v1/chat/completions", headers=headers, json=payload
         )
 
-        # Processa a resposta
         response_data = response.json()
         if "choices" not in response_data:
             raise ValueError(f"Erro na resposta da API: {response_data}")
 
         description = response_data["choices"][0]["message"]["content"]
 
-        # Gera o embedding da imagem
         embedding = generate_text_embedding(description)
 
-        # Salva no banco de dados
         save_message(
             sender="assistant",
             content=description,
@@ -161,7 +158,6 @@ def generate_text_embedding(text, model="text-embedding-3-small"):
             model=model
         )
 
-        # Acessando corretamente o primeiro embedding retornado
         embedding = response.data[0].embedding
         return embedding
     except Exception as e:
@@ -244,10 +240,8 @@ def run_thread(thread_id, assistant_id, instructions):
                 self.response += delta.value
                 print(delta.value, end="", flush=True)
 
-    # Inicializar o EventHandler
     event_handler = EventHandler()
 
-    # Executar o Run com o stream
     with client.beta.threads.runs.stream(
         thread_id=thread_id,
         assistant_id=assistant_id,
@@ -256,23 +250,18 @@ def run_thread(thread_id, assistant_id, instructions):
     ) as stream:
         stream.until_done()
 
-    # Salvar a resposta completa no banco após o stream finalizar
     save_message(sender="assistant", content=event_handler.response)
 
-    # Verificar se a resposta começa com "Sim"
+
     if event_handler.response.lower().startswith("sim"):
-        # Obter o texto do usuário
         user_last_message = get_last_user_message()
         print(f'funcinou')
         if user_last_message:
-            # Gerar o embedding do texto do usuário
             user_embedding = generate_text_embedding(user_last_message)
             print('entrou')
             if user_embedding:
-                # Buscar todos os embeddings do banco
                 embeddings = get_all_embeddings()
                 print('buscando embeddings')
-                # Encontrar embeddings semelhantes
                 similar_message = find_similar_embedding(user_embedding, embeddings)
 
                 if similar_message:
@@ -294,31 +283,26 @@ def find_similar_embedding(user_embedding, embeddings, threshold=0.7):
     Encontra embeddings semelhantes com base no embedding do usuário.
     """
     try:
-        # Validações para evitar erros
         if user_embedding is None:
             print("O embedding do usuário está vazio.")
             return None
 
-        # Filtrar embeddings válidos no banco
         valid_embeddings = [
             {"embedding": emb["embedding"], "message": emb["message"]}
             for emb in embeddings
             if emb["embedding"] is not None
         ]
 
-        # Verificar se há embeddings válidos para comparação
         if not valid_embeddings:
             print("Nenhum embedding válido encontrado no banco.")
             return None
 
-        # Calcular similaridade
         results = []
         for emb in valid_embeddings:
             similarity = cosine_similarity(user_embedding, emb["embedding"])
             if similarity >= threshold:
                 results.append({"similarity": similarity, "message": emb["message"]})
 
-        # Ordenar por maior similaridade
         results.sort(key=lambda x: x["similarity"], reverse=True)
 
         return results[0] if results else None
